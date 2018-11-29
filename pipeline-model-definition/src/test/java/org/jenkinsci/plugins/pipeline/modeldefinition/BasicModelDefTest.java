@@ -98,14 +98,6 @@ public class BasicModelDefTest extends AbstractModelDefTest {
     }
 
     @Test
-    public void simplePipeline() throws Exception {
-        expect("simplePipeline")
-                .logContains("[Pipeline] { (foo)", "hello")
-                .logNotContains("[Pipeline] { (" + SyntheticStageNames.postBuild() + ")")
-                .go();
-    }
-
-    @Test
     public void failingPipeline() throws Exception {
         expect(Result.FAILURE, "failingPipeline")
                 .logContains("[Pipeline] { (foo)",
@@ -266,21 +258,13 @@ public class BasicModelDefTest extends AbstractModelDefTest {
                 .go();
     }
 
+    // Covers both symbol-based and legacy metastep syntax
     @Test
     public void metaStepSyntax() throws Exception {
         env(s).set();
         expect("metaStepSyntax")
-                .logContains("[Pipeline] { (foo)", "ONAGENT=true")
                 .archives("msg.out", "hello world")
-                .go();
-    }
-
-    @Test
-    public void legacyMetaStepSyntax() throws Exception {
-        env(s).set();
-        expect("legacyMetaStepSyntax")
-                .logContains("[Pipeline] { (foo)", "ONAGENT=true")
-                .archives("msg.out", "hello world")
+                .archives("msg2.out", "goodbye world")
                 .go();
     }
 
@@ -430,67 +414,6 @@ public class BasicModelDefTest extends AbstractModelDefTest {
 
         expect("objectMethodPipelineCall")
                 .logContains("Hi there")
-                .go();
-    }
-
-    @Test
-    public void whenExprUsingOutsideVarAndFunc() throws Exception {
-        expect("whenExprUsingOutsideVarAndFunc")
-                .logContains("[Pipeline] { (One)", "[Pipeline] { (Two)", "World")
-                .go();
-    }
-
-    // basicWhen, skippedWhen, whenBranchFalse, whenBranchTrue, whenNot, whenOr, whenAnd are covered elsewhere
-
-    @Test
-    public void whenLaterStages() throws Exception {
-        expect("whenLaterStages")
-                .logContains("[Pipeline] { (One)", "[Pipeline] { (Two)", "I'm running anyway", "And I run last of all")
-                .logNotContains("World")
-                .go();
-    }
-
-    @Issue("JENKINS-42226")
-    @Test
-    public void whenBranchNull() throws Exception {
-        expect("whenBranchNull")
-                .logContains("[Pipeline] { (One)", "[Pipeline] { (Two)")
-                .logNotContains("World")
-                .go();
-    }
-
-    @Issue("JENKINS-42762")
-    @Test
-    public void whenMultiple() throws Exception {
-        expect("whenMultiple")
-                .logContains("[Pipeline] { (One)", "[Pipeline] { (Two)")
-                .logNotContains("World")
-                .go();
-    }
-
-    @Test
-    public void whenAndOrSingle() throws Exception {
-        expect("whenAndOrSingle")
-                .logContains("[Pipeline] { (One)", "[Pipeline] { (Two)")
-                .logNotContains("World")
-                .go();
-    }
-
-    @Test
-    public void whenNestedCombinations() throws Exception {
-        expect("whenNestedCombinations")
-                .logContains("First stage has no condition",
-                        "Second stage meets condition",
-                        "Fourth stage meets condition")
-                .logNotContains("Third stage meets condition")
-                .go();
-    }
-
-    @Test
-    public void whenEnv() throws Exception {
-        expect("whenEnv")
-                .logContains("[Pipeline] { (One)", "[Pipeline] { (Two)", "World", "Ignore case worked")
-                .logNotContains("Should never be reached")
                 .go();
     }
 

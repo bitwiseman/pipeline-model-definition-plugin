@@ -87,12 +87,64 @@ public class WhenStageTest extends AbstractModelDefTest {
     }
 
     @Test
-    public void simpleWhen() throws Exception {
-        env(s).put("SECOND_STAGE", "NOPE").set();
-        ExpectationsBuilder expect = expect("when", "simpleWhen").runFromRepo(false);
-        expect.logContains("One", "Hello", "Should I run?", "Two").logNotContains("World").go();
-        env(s).put("SECOND_STAGE", "RUN").set();
-        expect.resetForNewRun(Result.SUCCESS).logContains("One", "Hello", "Should I run?", "Two", "World").go();
+    public void whenExprUsingOutsideVarAndFunc() throws Exception {
+        expect("whenExprUsingOutsideVarAndFunc")
+                .logContains("[Pipeline] { (One)", "[Pipeline] { (Two)", "World")
+                .go();
+    }
+
+    // basicWhen, skippedWhen, whenBranchFalse, whenBranchTrue, whenNot, whenOr, whenAnd are covered elsewhere
+
+    @Test
+    public void whenLaterStages() throws Exception {
+        expect("whenLaterStages")
+                .logContains("[Pipeline] { (One)", "[Pipeline] { (Two)", "I'm running anyway", "And I run last of all")
+                .logNotContains("World")
+                .go();
+    }
+
+    @Issue("JENKINS-42226")
+    @Test
+    public void whenBranchNull() throws Exception {
+        expect("whenBranchNull")
+                .logContains("[Pipeline] { (One)", "[Pipeline] { (Two)")
+                .logNotContains("World")
+                .go();
+    }
+
+    @Issue("JENKINS-42762")
+    @Test
+    public void whenMultiple() throws Exception {
+        expect("whenMultiple")
+                .logContains("[Pipeline] { (One)", "[Pipeline] { (Two)")
+                .logNotContains("World")
+                .go();
+    }
+
+    @Test
+    public void whenAndOrSingle() throws Exception {
+        expect("whenAndOrSingle")
+                .logContains("[Pipeline] { (One)", "[Pipeline] { (Two)")
+                .logNotContains("World")
+                .go();
+    }
+
+    @Test
+    public void whenNestedCombinations() throws Exception {
+        expect("whenNestedCombinations")
+                .logContains("First stage has no condition",
+                        "Second stage meets condition",
+                        "Fourth stage meets condition")
+                .logNotContains("Third stage meets condition")
+                .go();
+    }
+
+    @Test
+    public void whenEnv() throws Exception {
+        expect("whenEnv")
+                .logContains("[Pipeline] { (One)", "[Pipeline] { (Two)", "World", "Ignore case worked")
+                .logNotContains("Should never be reached")
+                .go();
     }
 
     @Test
