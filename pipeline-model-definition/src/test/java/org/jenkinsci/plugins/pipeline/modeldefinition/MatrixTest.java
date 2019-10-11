@@ -177,6 +177,62 @@ public class MatrixTest extends AbstractModelDefTest {
             .go();
     }
 
+    @Issue("JENKINS-")
+    @Test
+    public void matrix100() throws Exception {
+        expect("matrix/matrix100")
+            .logContains("{ (Branch: Matrix - letters1 = 'a', letters10 = 'a')",
+                "{ (Branch: Matrix - letters1 = 'j', letters10 = 'j')")
+            .go();
+    }
+
+    @Ignore("Too large for ci testing")
+    @Issue("JENKINS-")
+    @Test
+    public void matrix256() throws Exception {
+        expect("matrix/matrix256")
+            .logContains("{ (Branch: Matrix - letters1 = 'a', letters4 = 'a', letters16 = 'a', letters64 = 'a')",
+                "{ (Branch: Matrix - letters1 = 'd', letters4 = 'd', letters16 = 'd', letters64 = 'd')")
+            .go();
+    }
+
+
+    @Ignore("Too large for ci testing")
+    @Issue("JENKINS-")
+    @Test
+    public void matrix1024() throws Exception {
+        expect("matrix/matrix1024")
+            .logContains("[Pipeline] { (foo)",
+                "{ (Branch: Matrix - OS_VALUE = 'linux')",
+                "{ (Branch: Matrix - OS_VALUE = 'windows')",
+                "{ (Branch: Matrix - OS_VALUE = 'mac')")
+            .go();
+    }
+
+    @Ignore("Too large for ci testing")
+    @Issue("JENKINS-")
+    @Test
+    public void matrix65200() throws Exception {
+        expect("matrix/matrix65200")
+            .logContains("[Pipeline] { (foo)",
+                "{ (Branch: Matrix - OS_VALUE = 'linux')",
+                "{ (Branch: Matrix - OS_VALUE = 'windows')",
+                "{ (Branch: Matrix - OS_VALUE = 'mac')")
+            .go();
+    }
+
+    @Ignore("Too large for ci testing")
+    @Issue("JENKINS-")
+    @Test
+    public void matrix65201() throws Exception {
+        expect("matrix/matrix65201")
+            .logContains("[Pipeline] { (foo)",
+                "{ (Branch: Matrix - OS_VALUE = 'linux')",
+                "{ (Branch: Matrix - OS_VALUE = 'windows')",
+                "{ (Branch: Matrix - OS_VALUE = 'mac')")
+            .go();
+    }
+
     @Test
     public void matrixPipelineTwoAxis() throws Exception {
         expect("matrix/matrixPipelineTwoAxis")

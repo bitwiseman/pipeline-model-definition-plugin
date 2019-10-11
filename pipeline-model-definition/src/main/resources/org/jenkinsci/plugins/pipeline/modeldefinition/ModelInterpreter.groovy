@@ -206,7 +206,11 @@ class ModelInterpreter implements Serializable {
      */
     def getParallelStages(Root root, Agent parentAgent, Stage thisStage, Throwable firstError, SkippedStageReason skippedReason) {
         def parallelStages = [:]
+        def count = 0;
         thisStage?.parallel?.stages?.each { content ->
+            if (count++ > 230) {
+                return
+            }
             if (skippedReason != null) {
                 parallelStages.put(content.name,
                     evaluateStage(root, parentAgent, content, firstError, thisStage, skippedReason.cloneWithNewStage(content.name)))

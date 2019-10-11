@@ -30,10 +30,17 @@ import hudson.model.JobProperty
 import hudson.model.ParameterDefinition
 import hudson.model.Run
 import hudson.triggers.Trigger
+import org.apache.commons.lang.ClassUtils
 import org.codehaus.groovy.ast.ClassHelper
+import org.codehaus.groovy.ast.ClassNode
 import org.codehaus.groovy.ast.DynamicVariable
+import org.codehaus.groovy.ast.FieldNode
+import org.codehaus.groovy.ast.MethodNode
+import org.codehaus.groovy.ast.ModuleNode
+import org.codehaus.groovy.ast.Parameter
 import org.codehaus.groovy.ast.expr.*
 import org.codehaus.groovy.ast.stmt.*
+import org.codehaus.groovy.runtime.metaclass.MethodHelper
 import org.codehaus.groovy.syntax.Types
 import org.jenkinsci.plugins.pipeline.modeldefinition.Utils
 import org.jenkinsci.plugins.pipeline.modeldefinition.actions.ExecutionModelAction
@@ -50,6 +57,9 @@ import javax.annotation.Nonnull
 
 import static org.codehaus.groovy.ast.tools.GeneralUtils.*
 import static org.jenkinsci.plugins.pipeline.modeldefinition.parser.ASTParserUtils.*
+import static org.objectweb.asm.Opcodes.ACC_FINAL
+import static org.objectweb.asm.Opcodes.ACC_PUBLIC
+import static org.objectweb.asm.Opcodes.ACC_STATIC
 
 /**
  * Transforms a given {@link ModelASTPipelineDef} into the {@link Root} used for actual runtime. Also attaches a
@@ -57,8 +67,83 @@ import static org.jenkinsci.plugins.pipeline.modeldefinition.parser.ASTParserUti
  */
 @SuppressFBWarnings(value="SE_NO_SERIALVERSIONID")
 class RuntimeASTTransformer {
-    RuntimeASTTransformer() {
+    ClassNode rootClassNode
+    ModuleNode moduleNode
+    def methodClassNode = [:]
+    def methodCount = [:]
+    def constLookup = [:]
+//    def variableClassNode = null
+//    def variableValues = [:]
+
+
+    RuntimeASTTransformer(ModuleNode moduleNode) {
+        this.moduleNode = moduleNode
     }
+
+    Expression ctorXFunction(ClassNode type, Expression args) {
+        String typeName = type.nameWithoutPackage;
+
+        if (!methodCount.containsKey(typeName)) {
+            if (!this.moduleNode.classes.find { it.nameWithoutPackage == typeName }) {
+                methodCount[typeName] = 0
+                methodClassNode[typeName] = new ClassNode("DeclarativeRuntime_${typeName}_${Math.abs(type.hashCode())}", ACC_PUBLIC, ClassHelper.make(Object))
+                this.moduleNode.addClass(methodClassNode[typeName])
+            }
+        }
+
+        ClassNode classNode = methodClassNode[typeName]
+
+        String name = "${typeName}_${methodCount[typeName]++}"
+        while (classNode.methods.find {it.name == name }) {
+            name = "${typeName}_${methodCount[typeName]++}"
+        }
+
+        Statement methodBody =
+                block(
+                        returnS(ctorX(type, args))
+                )
+
+        MethodNode method = new MethodNode(name, ACC_PUBLIC | ACC_STATIC, ClassHelper.make(Stage.class), [] as Parameter[], [] as ClassNode[], methodBody)
+        classNode.addMethod(method)
+        return callX(classNode, name)
+    }
+
+    Expression constXString(String value) {
+        if (!constLookup[value]) {
+            constLookup[value] = constX(value)
+        }
+
+        return constLookup[value]
+    }
+
+//    Expression constXStringVariable(String value) {
+//        String typeName = "Variable"
+//
+//        if (!variableClassNode) {
+//            if (!this.moduleNode.classes.find { it.nameWithoutPackage == typeName }) {
+//                methodClassNode[typeName] = new ClassNode("DeclarativeRuntime_${typeName}_${Math.abs(moduleNode.hashCode())}", ACC_PUBLIC, ClassHelper.make(Object))
+//                this.moduleNode.addClass(methodClassNode[typeName])
+//            }
+//        }
+//
+//        ClassNode classNode = methodClassNode[typeName]
+//
+//        String name = "${typeName}_${variableCount++}"
+//        while (classNode.methods.find {it.name == name }) {
+//            name = "${typeName}_${variableCount++}"
+//        }
+//
+//        classNode.addField()
+//
+//        Statement methodBody =
+//                block(
+//                        returnS(ctorX(type, args))
+//                )
+//
+//        MethodNode method = new FieldNode(name, ACC_PUBLIC | ACC_STATIC | ACC_FINAL, classNode,  ClassHelper.make(Stage.class), [] as Parameter[], [] as ClassNode[], methodBody)
+//        classNode.addMethod(method)
+//        return callX(classNode, name)
+//    }
 
     /**
      * Given a run, transform a {@link ModelASTPipelineDef}, attach the {@link ModelASTStages} for that {@link ModelASTPipelineDef} to the
@@ -105,7 +190,7 @@ class RuntimeASTTransformer {
                     nameToSteps.addMapEntryExpression(constX(cond.condition), steps)
                 }
             }
-            return ctorX(ClassHelper.make(container), args(nameToSteps))
+            return ctorXFunction(ClassHelper.make(container), args(nameToSteps))
         }
         return constX(null)
     }
@@ -136,10 +221,10 @@ class RuntimeASTTransformer {
                     throw new IllegalArgumentException("Expected a BlockStatement for agent but got an instance of ${original.sourceLocation.class}")
                 }
             }
-            return ctorX(ClassHelper.make(Agent.class), args(closureX(block(returnS(m)))))
+            return ctorXFunction(ClassHelper.make(Agent.class), args(closureX(block(returnS(m)))))
         }
 
-        return constX(null)
+        return ConstantExpression.NULL
     }
 
     /**
@@ -153,7 +238,7 @@ class RuntimeASTTransformer {
         if (isGroovyAST(original)) {
             return transformEnvironmentMap(original.variables)
         }
-        return constX(null)
+        return ConstantExpression.NULL
     }
 
     /**
@@ -165,13 +250,13 @@ class RuntimeASTTransformer {
      */
     Expression transformEnvironmentMap(@Nonnull Map<ModelASTKey, ModelASTEnvironmentValue> variables) {
         if (!variables.isEmpty()) {
-            return ctorX(ClassHelper.make(Environment.class),
+            return ctorXFunction(ClassHelper.make(Environment.class),
                     args(
                             generateEnvironmentResolver(variables, ModelASTValue.class),
                             generateEnvironmentResolver(variables, ModelASTInternalFunctionCall.class)
                     ))
         }
-        return constX(null)
+        return ConstantExpression.NULL
     }
 
     /**
@@ -205,9 +290,9 @@ class RuntimeASTTransformer {
                     Expression expr = translateEnvironmentValue(k.key, toTransform, keys)
                     if (expr != null) {
                         if (expr instanceof ClosureExpression) {
-                            closureMap.addMapEntryExpression(constX(k.key), expr)
+                            closureMap.addMapEntryExpression(constXString(k.key), expr)
                         } else {
-                            closureMap.addMapEntryExpression(constX(k.key), closureX(block(returnS(expr))))
+                            closureMap.addMapEntryExpression(constXString(k.key), closureX(block(returnS(expr))))
                         }
                     } else {
                         throw new IllegalArgumentException("Empty closure for ${k.key}")
@@ -441,6 +526,7 @@ class RuntimeASTTransformer {
 
         if (body != null) {
             return closureX(
+
                 block(
                     returnS(
                         body
@@ -519,7 +605,7 @@ class RuntimeASTTransformer {
             return ctorX(ClassHelper.make(Libraries.class), args(listArg))
         }
 
-        return constX(null)
+        return ConstantExpression.NULL
     }
 
     /**
@@ -568,7 +654,7 @@ class RuntimeASTTransformer {
                             ListExpression argList = new ListExpression(methArgs)
                             wrappersMap.addMapEntryExpression(constX(w.name), argList)
                         } else {
-                            wrappersMap.addMapEntryExpression(constX(w.name), constX(null))
+                            wrappersMap.addMapEntryExpression(constX(w.name), ConstantExpression.NULL)
                         }
                     }
                 }
@@ -582,7 +668,7 @@ class RuntimeASTTransformer {
             }
         }
 
-        return constX(null)
+        return ConstantExpression.NULL
     }
 
     /**
@@ -627,7 +713,7 @@ class RuntimeASTTransformer {
      */
     Expression transformRoot(@CheckForNull ModelASTPipelineDef original) {
         if (isGroovyAST(original)) {
-            return ctorX(ClassHelper.make(Root.class),
+            return ctorXFunction(ClassHelper.make(Root.class),
                 args(transformAgent(original.agent),
                     transformStages(original.stages),
                     transformPostBuild(original.postBuild),
@@ -640,9 +726,10 @@ class RuntimeASTTransformer {
                     constX(original.stages.getUuid().toString())))
         }
 
-        return constX(null)
+        return ConstantExpression.NULL
     }
 
+    static int stage_count = 0
     /**
      * Generates the AST (to be CPS-transformed) for instantiating {@link Stage}.
      *
@@ -658,28 +745,29 @@ class RuntimeASTTransformer {
                     transformStages(original.parallel) :
                     transformMatrix(original.matrix)
 
-            return ctorX(ClassHelper.make(Stage.class),
-                args(constX(original.name),
-                    transformStepsFromStage(original),
-                    transformAgent(original.agent),
-                    transformPostStage(original.post),
-                    transformStageConditionals(original.when),
-                    transformTools(original.tools),
-                    transformEnvironment(original.environment),
-                    constX(original.failFast != null ? original.failFast : false),
-                    transformOptions(original.options),
-                    transformStageInput(original.input, original.name),
-                    transformStages(original.stages),
-                    parallel,
-                    constX(null)))
+            return ctorXFunction(ClassHelper.make(Stage.class),
+                    args(constX(original.name),
+                            transformStepsFromStage(original),
+                            transformAgent(original.agent),
+                            transformPostStage(original.post),
+                            transformStageConditionals(original.when),
+                            transformTools(original.tools),
+                            transformEnvironment(original.environment),
+                            constX(original.failFast != null ? original.failFast : false),
+                            transformOptions(original.options),
+                            transformStageInput(original.input, original.name),
+                            transformStages(original.stages),
+                            parallel,
+                            ConstantExpression.NULL))
+
         }
 
-        return constX(null)
+        return ConstantExpression.NULL
     }
 
     Expression transformStageInput(@CheckForNull ModelASTStageInput original, String stageName) {
         if (isGroovyAST(original)) {
-            Expression paramsExpr = constX(null)
+            Expression paramsExpr = ConstantExpression.NULL
             if (!original.parameters.isEmpty()) {
                 paramsExpr = transformListOfDescribables(original.parameters, ParameterDefinition.class)
             }
@@ -691,7 +779,7 @@ class RuntimeASTTransformer {
                     valueOrNull(original.submitterParameter),
                     paramsExpr))
         }
-        return constX(null)
+        return ConstantExpression.NULL
     }
 
     @SuppressFBWarnings(value = "UPM_UNCALLED_PRIVATE_METHOD")
@@ -726,11 +814,11 @@ class RuntimeASTTransformer {
 
             return ctorX(ClassHelper.make(StageConditionals.class),
                 args(closureX(block(returnS(closList))),
-                    constX(original.beforeAgent != null ? original.beforeAgent : false),
-                    constX(original.beforeInput != null ? original.beforeInput : false)
+                    Boolean.TRUE.equals(original.beforeAgent) ? ConstantExpression.TRUE : ConstantExpression.FALSE,
+                    Boolean.TRUE.equals(original.beforeInput) ? ConstantExpression.TRUE : ConstantExpression.FALSE
                 ))
         }
-        return constX(null)
+        return ConstantExpression.NULL
     }
 
     /**
@@ -748,13 +836,13 @@ class RuntimeASTTransformer {
             }
 
             if (original instanceof ModelASTParallel) {
-                return ctorX(ClassHelper.make(Parallel.class), args(argList))
+                return ctorXFunction(ClassHelper.make(Parallel.class), args(argList))
             } else {
-                return ctorX(ClassHelper.make(Stages.class), args(argList))
+                return ctorXFunction(ClassHelper.make(Stages.class), args(argList))
             }
         }
 
-        return constX(null)
+        return ConstantExpression.NULL
     }
 
     /**
@@ -767,7 +855,6 @@ class RuntimeASTTransformer {
      */
     Expression transformMatrix(@CheckForNull ModelASTMatrix original) {
         if (isGroovyAST(original) && !original?.stages?.stages?.isEmpty() && !original?.axes?.axes?.isEmpty()) {
-            ListExpression argList = new ListExpression()
 
             // generate matrix combinations of axes - cartesianProduct
             Set<Map<ModelASTKey, ModelASTValue>> expansion = expandAxes(original.axes.axes)
@@ -776,15 +863,32 @@ class RuntimeASTTransformer {
             filterExcludes(expansion, original.excludes)
 
             // for each combination
+
+            def listLimit = 250
+            if (expansion.size() > listLimit * listLimit) {
+                throw new IllegalArgumentException("Matrix supports up to ${listLimit} cells. Found ${expansion.size()}.")
+            }
+
+            ListExpression expandedMatrixStages = new ListExpression()
+            ArrayList<Expression> argList = new ArrayList<>()
+            argList.add(expandedMatrixStages)
+
+            def count = 0
             expansion.each { item ->
-                argList.addExpression(transformMatrixStage(item, original))
+                if (count++ >= listLimit) {
+                    count = 1
+                    expandedMatrixStages = new ListExpression()
+                    argList.add(expandedMatrixStages)
+                }
+
+                expandedMatrixStages.addExpression(transformMatrixStage(item, original))
             }
 
             // return matrix class containing the list of generated stages
-            return ctorX(ClassHelper.make(Matrix.class), args(argList))
+            return ctorXFunction(ClassHelper.make(Matrix.class), args((Expression[])argList.toArray()))
         }
 
-        return constX(null)
+        return ConstantExpression.NULL
     }
 
     Set<Map<ModelASTKey, ModelASTValue>> expandAxes(List<ModelASTAxis> axes) {
@@ -837,7 +941,7 @@ class RuntimeASTTransformer {
             // TODO: Do I need to create a new ModelASTStage each time?  I don't think so.
             String name = "Matrix - " + cellLabels.join(", ")
 
-            return ctorX(ClassHelper.make(Stage.class),
+            return ctorXFunction(ClassHelper.make(Stage.class),
                     args(constX(name),
                             constX(null), // steps
                             transformAgent(original.agent),
@@ -845,7 +949,7 @@ class RuntimeASTTransformer {
                             transformStageConditionals(original.when),
                             transformTools(original.tools),
                             transformEnvironment(original.environment),
-                            constX(false), // failfast on serial is not interesting
+                            ConstantExpression.FALSE, // failfast on serial is not interesting
                             transformOptions(original.options),
                             transformStageInput(original.input, name),
                             transformStages(original.stages),
@@ -853,7 +957,7 @@ class RuntimeASTTransformer {
                             transformEnvironmentMap(cell)))  //  matrixCellEnvironment holding values for this cell in the matrix
         }
 
-        return constX(null)
+        return ConstantExpression.NULL
     }
 
     /**
@@ -881,7 +985,7 @@ class RuntimeASTTransformer {
             }
         }
 
-        return constX(null)
+        return ConstantExpression.NULL
     }
 
     /**
@@ -898,7 +1002,7 @@ class RuntimeASTTransformer {
             return callX(ClassHelper.make(Utils.class), "createStepsBlock",
                 args(transformedBody))
         }
-        return constX(null)
+        return ConstantExpression.NULL
     }
 
     /**
@@ -922,7 +1026,7 @@ class RuntimeASTTransformer {
             }
             return ctorX(ClassHelper.make(Tools.class), args(toolsMap))
         }
-        return constX(null)
+        return ConstantExpression.NULL
     }
 
     /**
