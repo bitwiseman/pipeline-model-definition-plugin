@@ -24,6 +24,7 @@
 
 package org.jenkinsci.plugins.pipeline.modeldefinition.parser
 
+import com.cloudbees.groovy.cps.NonCPS
 import com.google.common.collect.Sets
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings
 import hudson.model.JobProperty
@@ -31,6 +32,7 @@ import hudson.model.ParameterDefinition
 import hudson.model.Run
 import hudson.triggers.Trigger
 import org.apache.commons.lang.ClassUtils
+import org.codehaus.groovy.ast.AnnotationNode
 import org.codehaus.groovy.ast.ClassHelper
 import org.codehaus.groovy.ast.ClassNode
 import org.codehaus.groovy.ast.DynamicVariable
@@ -71,8 +73,8 @@ class RuntimeASTTransformer {
     ModuleNode moduleNode
     def methodClassNode = [:]
     def methodCount = [:]
+    def variableClassNode = null
     def constLookup = [:]
-//    def variableClassNode = null
 //    def variableValues = [:]
 
 
@@ -80,7 +82,7 @@ class RuntimeASTTransformer {
         this.moduleNode = moduleNode
     }
 
-    Expression ctorXFunction(ClassNode type, Expression args) {
+    Expression ctorXFunction(ClassNode type, Expression args, nonCPS = false) {
         String typeName = type.nameWithoutPackage;
 
         if (!methodCount.containsKey(typeName)) {
@@ -94,7 +96,7 @@ class RuntimeASTTransformer {
         ClassNode classNode = methodClassNode[typeName]
 
         String name = "${typeName}_${methodCount[typeName]++}"
-        while (classNode.methods.find {it.name == name }) {
+        while (classNode.getMethod(name, [] as Parameter[]) != null) {
             name = "${typeName}_${methodCount[typeName]++}"
         }
 
@@ -103,47 +105,63 @@ class RuntimeASTTransformer {
                         returnS(ctorX(type, args))
                 )
 
-        MethodNode method = new MethodNode(name, ACC_PUBLIC | ACC_STATIC, ClassHelper.make(Stage.class), [] as Parameter[], [] as ClassNode[], methodBody)
+        MethodNode method = new MethodNode(name, ACC_PUBLIC | ACC_STATIC, type, [] as Parameter[], [] as ClassNode[], methodBody)
+        if(nonCPS) {
+            method.addAnnotation(new AnnotationNode(ClassHelper.make(NonCPS.class)))
+        }
+
         classNode.addMethod(method)
         return callX(classNode, name)
     }
 
-    Expression constXString(String value) {
-        if (!constLookup[value]) {
-            constLookup[value] = constX(value)
+
+    Expression constAsVarX(Object value) {
+
+        String typeName = "Variable"
+
+        if (!methodClassNode[typeName]) {
+            methodCount[typeName] = 0
+            if (!this.moduleNode.classes.find { it.nameWithoutPackage == typeName }) {
+                methodClassNode[typeName] = new ClassNode("DeclarativeRuntime_${typeName}_${Math.abs(moduleNode.hashCode())}", ACC_PUBLIC, ClassHelper.make(Object))
+                this.moduleNode.addClass(methodClassNode[typeName])
+            }
         }
 
-        return constLookup[value]
-    }
+        ClassNode classNode = methodClassNode[typeName]
+        ClassNode valueClass = ClassHelper.make(value.class)
 
-//    Expression constXStringVariable(String value) {
-//        String typeName = "Variable"
-//
-//        if (!variableClassNode) {
-//            if (!this.moduleNode.classes.find { it.nameWithoutPackage == typeName }) {
-//                methodClassNode[typeName] = new ClassNode("DeclarativeRuntime_${typeName}_${Math.abs(moduleNode.hashCode())}", ACC_PUBLIC, ClassHelper.make(Object))
-//                this.moduleNode.addClass(methodClassNode[typeName])
-//            }
-//        }
-//
-//        ClassNode classNode = methodClassNode[typeName]
-//
-//        String name = "${typeName}_${variableCount++}"
-//        while (classNode.methods.find {it.name == name }) {
-//            name = "${typeName}_${variableCount++}"
-//        }
-//
-//        classNode.addField()
-//
-//        Statement methodBody =
-//                block(
-//                        returnS(ctorX(type, args))
-//                )
-//
-//        MethodNode method = new FieldNode(name, ACC_PUBLIC | ACC_STATIC | ACC_FINAL, classNode,  ClassHelper.make(Stage.class), [] as Parameter[], [] as ClassNode[], methodBody)
-//        classNode.addMethod(method)
-//        return callX(classNode, name)
-//    }
+        if (!constLookup[valueClass]) {
+            constLookup[valueClass] = [:]
+        }
+
+        Expression variableExpression = constLookup[valueClass][value]
+        if (!variableExpression) {
+
+            String name = "${typeName}_${methodCount[typeName]++}"
+            while (classNode.getField(name) != null) {
+                name = "${typeName}_${methodCount[typeName]++}"
+            }
+
+
+            Statement methodBody =
+                    block(
+                            returnS(constX(value))
+                    )
+
+            MethodNode method = new MethodNode(name, ACC_PUBLIC | ACC_STATIC, valueClass, [] as Parameter[], [] as ClassNode[], methodBody)
+            classNode.addMethod(method)
+            method.addAnnotation(new AnnotationNode(ClassHelper.make(NonCPS.class)))
+
+            variableExpression = callX(classNode, name)
+            constLookup[valueClass][value] = variableExpression
+
+//            FieldNode fieldNode = classNode.addField(name, ACC_PUBLIC | ACC_STATIC, valueClass, constX(value))
+//            variableExpression = constX(value) //varX(fieldNode)
+//            constLookup[valueClass][value] = variableExpression
+        }
+
+        return variableExpression
+    }
 
     /**
      * Given a run, transform a {@link ModelASTPipelineDef}, attach the {@link ModelASTStages} for that {@link ModelASTPipelineDef} to the
@@ -192,7 +210,7 @@ class RuntimeASTTransformer {
             }
             return ctorXFunction(ClassHelper.make(container), args(nameToSteps))
         }
-        return constX(null)
+        return ConstantExpression.NULL
     }
 
     /**
@@ -210,7 +228,7 @@ class RuntimeASTTransformer {
                     ((ModelASTClosureMap)original.variables).variables.isEmpty())) {
                 // Zero-arg agent type
                 MapExpression zeroArg = new MapExpression()
-                zeroArg.addMapEntryExpression(constX(original.agentType.key), constX(true))
+                zeroArg.addMapEntryExpression(constX(original.agentType.key), ConstantExpression.TRUE)
                 m = zeroArg
             } else {
                 BlockStatementMatch match =
@@ -290,9 +308,9 @@ class RuntimeASTTransformer {
                     Expression expr = translateEnvironmentValue(k.key, toTransform, keys)
                     if (expr != null) {
                         if (expr instanceof ClosureExpression) {
-                            closureMap.addMapEntryExpression(constXString(k.key), expr)
+                            closureMap.addMapEntryExpression(constX(k.key), expr)
                         } else {
-                            closureMap.addMapEntryExpression(constXString(k.key), closureX(block(returnS(expr))))
+                            closureMap.addMapEntryExpression(constX(k.key), closureX(block(returnS(expr))))
                         }
                     } else {
                         throw new IllegalArgumentException("Empty closure for ${k.key}")
@@ -332,7 +350,7 @@ class RuntimeASTTransformer {
         Expression body = null
         if (expr instanceof ConstantExpression) {
             // If the expression is a constant, like 1, "foo", etc, just use that.
-            return expr
+            return expr // constAsVarX(((ConstantExpression)expr).value)
         } else if (expr instanceof ClassExpression) {
             // If the expression is a class, just use that.
             return expr
@@ -746,7 +764,7 @@ class RuntimeASTTransformer {
                     transformMatrix(original.matrix)
 
             return ctorXFunction(ClassHelper.make(Stage.class),
-                    args(constX(original.name),
+                    args(constAsVarX(original.name),
                             transformStepsFromStage(original),
                             transformAgent(original.agent),
                             transformPostStage(original.post),
@@ -758,7 +776,7 @@ class RuntimeASTTransformer {
                             transformStageInput(original.input, original.name),
                             transformStages(original.stages),
                             parallel,
-                            ConstantExpression.NULL))
+                            ConstantExpression.NULL), true)
 
         }
 
@@ -885,7 +903,7 @@ class RuntimeASTTransformer {
             }
 
             // return matrix class containing the list of generated stages
-            return ctorXFunction(ClassHelper.make(Matrix.class), args((Expression[])argList.toArray()))
+            return ctorXFunction(ClassHelper.make(Matrix.class), args((Expression[])argList.toArray()), true)
         }
 
         return ConstantExpression.NULL
@@ -942,8 +960,8 @@ class RuntimeASTTransformer {
             String name = "Matrix - " + cellLabels.join(", ")
 
             return ctorXFunction(ClassHelper.make(Stage.class),
-                    args(constX(name),
-                            constX(null), // steps
+                    args(constAsVarX(name),
+                            ConstantExpression.NULL, // steps
                             transformAgent(original.agent),
                             transformPostStage(original.post),
                             transformStageConditionals(original.when),
@@ -953,7 +971,7 @@ class RuntimeASTTransformer {
                             transformOptions(original.options),
                             transformStageInput(original.input, name),
                             transformStages(original.stages),
-                            constX(null), // parallel
+                            ConstantExpression.NULL, // parallel
                             transformEnvironmentMap(cell)))  //  matrixCellEnvironment holding values for this cell in the matrix
         }
 
@@ -1024,7 +1042,7 @@ class RuntimeASTTransformer {
                     }
                 }
             }
-            return ctorX(ClassHelper.make(Tools.class), args(toolsMap))
+            return ctorXFunction(ClassHelper.make(Tools.class), args(toolsMap))
         }
         return ConstantExpression.NULL
     }
