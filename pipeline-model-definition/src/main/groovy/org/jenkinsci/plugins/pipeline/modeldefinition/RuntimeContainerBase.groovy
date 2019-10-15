@@ -41,6 +41,7 @@ import org.codehaus.groovy.ast.stmt.BlockStatement
 import org.codehaus.groovy.ast.stmt.Statement
 import org.codehaus.groovy.control.SourceUnit
 import org.codehaus.groovy.runtime.InvokerHelper
+import org.codehaus.groovy.runtime.metaclass.MissingMethodExecutionFailed
 import org.jenkinsci.plugins.pipeline.StageStatus
 import org.jenkinsci.plugins.pipeline.StageTagsMetadata
 import org.jenkinsci.plugins.pipeline.SyntheticStage
@@ -81,6 +82,7 @@ import org.jenkinsci.plugins.workflow.steps.Step
 import org.jenkinsci.plugins.workflow.steps.StepDescriptor
 import org.kohsuke.accmod.Restricted
 import org.kohsuke.accmod.restrictions.NoExternalUse
+import sun.font.Script
 
 import javax.annotation.CheckForNull
 import javax.annotation.Nonnull
@@ -94,7 +96,8 @@ import java.util.concurrent.TimeUnit
  * @author Liam Newman
  */
 @SuppressFBWarnings(value="SE_NO_SERIALVERSIONID")
-class RuntimeContainerBase {
+class RuntimeContainerBase extends groovy.lang.Script
+{
 
     private static CpsScript that
     private static Map<Class,RuntimeContainerBase> classMap = new HashMap<>()
@@ -116,7 +119,36 @@ class RuntimeContainerBase {
         return classMap[instanceClass]
     }
 
-    /**
+    @Whitelisted
+    @Override
+    Binding getBinding() {
+        return that.binding
+    }
+
+    @Whitelisted
+    @Override
+    Object getProperty(String property) {
+        return that.getProperty(property)
+    }
+
+
+    @Whitelisted
+    @Override
+    void setProperty(String property, Object newValue) {
+        that.setProperty(property, newValue)
+//        if ("binding".equals(property))
+//            setBinding((Binding) newValue)
+//        else if("metaClass".equals(property))
+//            setMetaClass((MetaClass)newValue)
+//        else
+//            getBinding().setVariable(property, newValue)
+    }
+
+    @Override
+    Object run() {
+        return null
+    }
+/**
      * @see CpsScript#sleep(long)
      */
     @Whitelisted

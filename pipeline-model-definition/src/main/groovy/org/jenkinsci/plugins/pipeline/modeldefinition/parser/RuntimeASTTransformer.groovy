@@ -219,7 +219,7 @@ class RuntimeASTTransformer {
                     throw new IllegalArgumentException("Expected a BlockStatement for agent but got an instance of ${original.sourceLocation.class}")
                 }
             }
-            return ctorX(ClassHelper.make(Agent.class), args(closureX(block(returnS(m)))))
+            return ctorXFunction(ClassHelper.make(Agent.class), args(closureX(block(returnS(m)))))
         }
 
         return constX(null)
@@ -710,7 +710,7 @@ class RuntimeASTTransformer {
      */
     Expression transformRoot(@CheckForNull ModelASTPipelineDef original) {
         if (isGroovyAST(original)) {
-            return ctorX(ClassHelper.make(Root.class),
+            return ctorXFunction(ClassHelper.make(Root.class),
                 args(transformAgent(original.agent),
                     transformStages(original.stages),
                     transformPostBuild(original.postBuild),
