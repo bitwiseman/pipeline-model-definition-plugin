@@ -96,7 +96,7 @@ import java.util.concurrent.TimeUnit
 @SuppressFBWarnings(value="SE_NO_SERIALVERSIONID")
 class RuntimeContainerBase {
 
-    protected static CpsScript that
+    private static CpsScript that
     private static Map<Class,RuntimeContainerBase> classMap = new HashMap<>()
 
     @Whitelisted
